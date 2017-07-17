@@ -1,0 +1,6 @@
+# Ignore executable
+/makeshiftd
+/makeshiftd.exe
+
+# Ignore tmp files
+/test/tmp/

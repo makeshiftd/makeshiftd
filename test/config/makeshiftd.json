@@ -1,0 +1,7 @@
+{
+    "version": 1,
+    "roots": [{
+        "name":"root1",
+        "path":"../docs/root1"
+    }]
+}
