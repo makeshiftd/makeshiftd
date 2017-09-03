@@ -3,10 +3,15 @@ package main
 import (
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/xyplane/debugger"
 )
+
+var debug = debugger.Debug("makeshiftd")
 
 type MkShtHandler struct {
 	Config   *AppConfig
@@ -110,11 +115,34 @@ func (h *DocRootHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	if serr != nil || stat.IsDir() {
+	if serr == nil && stat.IsDir() {
 		doc = filepath.Join(doc, "index.html")
-		stat, serr = os.Stat(doc)
 	}
+
+	dir := filepath.Dir(doc)
+	stat, serr = os.Stat(filepath.Join(dir, "Makefile"))
+	if serr == nil && !stat.IsDir() {
+		debug("Execute 'make' command")
+		cmd := exec.Command("make")
+		cmd.Dir = dir
+		output, cerr := cmd.CombinedOutput()
+		switch cerr.(type) {
+		case *exec.ExitError:
+			res.Header().Add("Content-Type", "text/plain")
+			res.WriteHeader(http.StatusInternalServerError)
+			res.Write(output)
+			return
+		case *exec.Error:
+			res.Header().Add("Content-Type", "test/plain")
+			res.WriteHeader(http.StatusInternalServerError)
+			res.Write([]byte(`build command 'make' not found`))
+			return
+		}
+	}
+
+	stat, serr = os.Stat(doc)
 	if serr != nil || stat.IsDir() {
+		debug("Document not found: %s", doc)
 		http.NotFound(res, req)
 		return
 	}
