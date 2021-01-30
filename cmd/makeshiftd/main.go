@@ -79,8 +79,10 @@ func listenAndServe(ctx context.Context, h http.Handler) error {
 
 			select {
 			case <-shutdownSignal:
+				log.Debug().Msg("Interrupt signal recieved: start shutdown")
 				serverCancel()
 			case <-serverCtx.Done():
+				log.Trace().Msg("HTTP server shutdown signal worker done")
 				break
 			}
 
@@ -90,11 +92,15 @@ func listenAndServe(ctx context.Context, h http.Handler) error {
 			for {
 				select {
 				case <-shutdownSignal:
+					log.Debug().Msg("Interrupt signal recieved: cancel shutdown")
 					signal.Stop(shutdownSignal)
+					log.Info().Msg("Http server shutdown interrupted")
 					shutdownCancel()
 				case <-shutdownTimer.C:
+					log.Info().Msg("HTTP server shutdown timeout (30s)")
 					shutdownCancel()
 				case <-ctx.Done():
+					log.Trace().Msg("HTTP server shutdown signal/timeout worker done")
 					return ctx.Err()
 				}
 			}
@@ -102,24 +108,31 @@ func listenAndServe(ctx context.Context, h http.Handler) error {
 		func(ctx context.Context) error {
 			select {
 			case <-serverCtx.Done():
-				return server.Shutdown(shutdownCtx)
+				log.Info().Msg("HTTP server shutdown started")
+				err := server.Shutdown(shutdownCtx)
+				log.Info().Err(err).Msg("HTTP server shutdown complete")
+				return err
 			case <-ctx.Done():
+				log.Trace().Msg("HTTP server shutdown worker done")
 				return ctx.Err()
 			}
 		},
 		func(ctx context.Context) error {
 			err := server.ListenAndServe()
+			log.Info().Err(err).Msg("HTTP server listener stopped")
 			// If a server shutdown has not been initiated,
 			// then return the error from ListenAndServe().
 			select {
 			case <-serverCtx.Done():
 				break
 			default:
+				log.Trace().Msg("HTTP listen and serve worker failed")
 				return err
 			}
 
 			select {
 			case <-ctx.Done():
+				log.Trace().Msg("HTTP listen and serve worker done")
 				return ctx.Err()
 			}
 		},
