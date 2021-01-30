@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -40,7 +39,6 @@ func mainWithContext(ctx context.Context) error {
 	log.Info().Msg("Makeshiftd starting")
 
 	handler := http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
-		fmt.Printf("Hello World!")
 		res.Write([]byte("<html><body>Hello World</body></html>"))
 	})
 
@@ -50,7 +48,7 @@ func mainWithContext(ctx context.Context) error {
 	return err
 }
 
-func listenAndServe(ctx context.Context, h http.Handler) error {
+func listenAndServe(ctx context.Context, handler http.Handler) error {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
@@ -62,6 +60,8 @@ func listenAndServe(ctx context.Context, h http.Handler) error {
 	defer shutdownCancel()
 
 	server := &http.Server{
+		Addr:    ":8080",
+		Handler: handler,
 		BaseContext: func(l net.Listener) context.Context {
 			return serverCtx
 		},
