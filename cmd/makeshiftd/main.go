@@ -70,7 +70,7 @@ func listenAndServe(ctx context.Context, h http.Handler) error {
 	return wg.Work(
 		context.Background(),
 		wg.NewUnlimited(),
-		wg.CancelOnFirstError(),
+		wg.CancelOnFirstDone(),
 
 		func(ctx context.Context) error {
 
