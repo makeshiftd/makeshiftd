@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -9,7 +11,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
+	zerologger "github.com/rs/zerolog/log"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
@@ -22,8 +24,10 @@ func main() {
 		w := zerolog.NewConsoleWriter(func(w *zerolog.ConsoleWriter) {
 			w.Out = os.Stdout
 		})
-		log.Logger = zerolog.New(w).With().Timestamp().Logger()
+		zerologger.Logger = zerolog.New(w).With().Timestamp().Logger()
 	}
+
+	log := zerologger.Logger
 
 	ctx := context.Background()
 	mainCtx, mainCancel := context.WithCancel(ctx)
@@ -31,7 +35,7 @@ func main() {
 
 	wg.Work(context.WithLog(ctx, log.With().Str("wg", "main")), nil, wg.CancelOnFirstDone(),
 		func(ctx context.C) error {
-			log := log.Ctx(ctx).With().Str("wk", "shutdown signal").Logger()
+			log := zerolog.Ctx(ctx).With().Str("wk", "shutdown").Logger()
 
 			const StateStarted = "STARTED"
 			const StateStopping = "STOPPING"
@@ -63,13 +67,13 @@ func main() {
 					shutdownCancel()
 
 				case <-mainCtx.Done():
-					log.Trace().Msg("Worker context cancelled")
+					log.Trace().Err(mainCtx.Err()).Msg("Worker context done")
 					return mainCtx.Err()
 				}
 			}
 		},
 		func(ctx context.C) error {
-			log := log.Ctx(ctx).With().Str("wk", "main with contexts").Logger()
+			log := zerolog.Ctx(ctx).With().Str("wk", "main").Logger()
 			err := mainWithContexts(log.WithContext(mainCtx), shutdownCtx)
 			if err != nil {
 				log.Err(err).Send()
@@ -84,7 +88,7 @@ func main() {
 }
 
 func mainWithContexts(mainCtx, shutdownCtx context.C) error {
-	log := log.Ctx(mainCtx)
+	log := zerolog.Ctx(mainCtx)
 
 	pflag.StringP("config", "f", "", "Location of configuration file")
 	pflag.Parse()
@@ -92,16 +96,29 @@ func mainWithContexts(mainCtx, shutdownCtx context.C) error {
 	viper.BindPFlag("configFile", pflag.Lookup("config"))
 
 	viper.SetConfigName("makeshiftd")
-	viper.AddConfigPath("/etc/makeshiftd")
 	viper.AddConfigPath("$HOME/.makeshifted")
+	viper.AddConfigPath("/etc/makeshiftd")
 
-	if viper.GetString("configFile") != "" {
-		viper.SetConfigFile(viper.GetString("configFile"))
+	configFile := viper.GetString("configFile")
+	if configFile != "" {
+		viper.SetConfigFile(configFile)
 	}
 
 	err := viper.ReadInConfig() // Find and read the config file
 	if err != nil {
-		return err
+		var perr *os.PathError
+		if errors.As(err, &perr) {
+			log.Err(err).Msgf("Configuration file not read: %s", configFile)
+			return err
+		}
+		var verr viper.ConfigFileNotFoundError
+		if !errors.As(err, &verr) {
+			return err
+		}
+	}
+	configFile = viper.ConfigFileUsed()
+	if configFile != "" {
+		log.Info().Msgf("Configuration file read: %s", configFile)
 	}
 
 	handler := http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
@@ -109,98 +126,57 @@ func mainWithContexts(mainCtx, shutdownCtx context.C) error {
 	})
 
 	log.Info().Msg("Makeshiftd starting")
-	err = listenAndServe(mainCtx, shutdownCtx, handler)
+	err = listenAndServe(mainCtx, shutdownCtx, handler, viper.Sub("server"))
 	log.Info().Msg("Makshiftd stopped")
 	return err
 }
 
-func listenAndServe(serverCtx, shutdownCtx context.C, handler http.Handler) error {
-	// if ctx == nil {
-	// 	ctx = context.TODO()
-	// }
+func listenAndServe(serverCtx, shutdownCtx context.C, handler http.Handler, c *viper.Viper) error {
+	logger := zerolog.Ctx(serverCtx)
 
-	// serverCtx, serverCancel := context.WithCancel(ctx)
-	// defer serverCancel()
-
-	// shutdownCtx, shutdownCancel := context.WithCancel(ctx)
-	// defer shutdownCancel()
+	address := fmt.Sprintf("%s:%s", c.GetString("host"), c.GetString("port"))
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    address,
 		Handler: handler,
-		BaseContext: func(l net.Listener) context.Context {
+		BaseContext: func(l net.Listener) context.C {
 			return serverCtx
 		},
 	}
 
-	return wg.Work(
-		context.Background(),
-		wg.NewUnlimited(),
-		wg.CancelOnFirstDone(),
+	ctx := context.WithLog(context.Background(), logger.With().Str("wg", "serve"))
+	return wg.Work(ctx, nil, wg.CancelOnFirstDone(),
+		func(ctx context.C) error {
+			log := zerolog.Ctx(ctx).With().Str("wk", "shutdown").Logger()
 
-		// func(ctx context.Context) error {
-
-		// 	shutdownSignal := make(chan os.Signal, 1)
-		// 	signal.Notify(shutdownSignal, os.Interrupt)
-
-		// 	select {
-		// 	case <-shutdownSignal:
-		// 		log.Debug().Msg("Interrupt signal recieved: start shutdown")
-		// 		serverCancel()
-		// 	case <-serverCtx.Done():
-		// 		log.Trace().Msg("HTTP server shutdown signal worker done")
-		// 		break
-		// 	}
-
-		// 	shutdownTimer := time.NewTimer(30 * time.Second)
-		// 	defer shutdownTimer.Stop()
-
-		// 	for {
-		// 		select {
-		// 		case <-shutdownSignal:
-		// 			log.Debug().Msg("Interrupt signal recieved: cancel shutdown")
-		// 			signal.Stop(shutdownSignal)
-		// 			log.Info().Msg("Http server shutdown interrupted")
-		// 			shutdownCancel()
-		// 		case <-shutdownTimer.C:
-		// 			log.Info().Msg("HTTP server shutdown timeout (30s)")
-		// 			shutdownCancel()
-		// 		case <-ctx.Done():
-		// 			log.Trace().Msg("HTTP server shutdown signal/timeout worker done")
-		// 			return ctx.Err()
-		// 		}
-		// 	}
-		// },
-		func(ctx context.Context) error {
 			select {
 			case <-serverCtx.Done():
 				log.Info().Msg("HTTP server shutdown started")
 				err := server.Shutdown(shutdownCtx)
-				log.Info().Err(err).Msg("HTTP server shutdown complete")
-				return err
+				if !errors.Is(err, http.ErrServerClosed) {
+					log.Err(err).Msg("HTTP server shutdown complete")
+					return err
+				}
+				log.Info().Msg("HTTP server shutdown complete")
+				return nil
+
 			case <-ctx.Done():
-				log.Trace().Msg("HTTP server shutdown worker done")
+				log.Trace().Err(ctx.Err()).Msg("Worker context done")
 				return ctx.Err()
 			}
 		},
 		func(ctx context.Context) error {
+			log := zerolog.Ctx(ctx).With().Str("wk", "listen").Logger()
+
+			log.Info().Msgf("HTTP server listening: %s", address)
 			err := server.ListenAndServe()
-			log.Info().Err(err).Msg("HTTP server listener stopped")
-			// If a server shutdown has not been initiated,
-			// then return the error from ListenAndServe().
-			select {
-			case <-serverCtx.Done():
-				break
-			default:
-				log.Trace().Msg("HTTP listen and serve worker failed")
+			if !errors.Is(err, http.ErrServerClosed) {
+				log.Err(err).Msg("HTTP server listening stopped")
 				return err
 			}
 
-			select {
-			case <-ctx.Done():
-				log.Trace().Msg("HTTP listen and serve worker done")
-				return ctx.Err()
-			}
+			log.Info().Msg("HTTP server listening stopped")
+			return nil
 		},
 	)
 }
