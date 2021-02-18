@@ -8,6 +8,7 @@ import (
 
 type C = context.Context
 type Context = context.Context
+type CancelFunc = context.CancelFunc
 
 var TODO = context.TODO
 var Background = context.Background

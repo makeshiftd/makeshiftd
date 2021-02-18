@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -122,6 +121,8 @@ func mainWithContexts(mainCtx, shutdownCtx context.C) error {
 	}
 
 	handler := http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		log := zerolog.Ctx(req.Context())
+		log.Info().Msg("Hello World")
 		res.Write([]byte("<html><body>Hello World</body></html>"))
 	})
 
@@ -134,14 +135,13 @@ func mainWithContexts(mainCtx, shutdownCtx context.C) error {
 func listenAndServe(serverCtx, shutdownCtx context.C, handler http.Handler, c *viper.Viper) error {
 	logger := zerolog.Ctx(serverCtx)
 
+	workHandler := NewWorkHandler(handler, WorkerContext())
+
 	address := fmt.Sprintf("%s:%s", c.GetString("host"), c.GetString("port"))
 
 	server := &http.Server{
 		Addr:    address,
-		Handler: handler,
-		BaseContext: func(l net.Listener) context.C {
-			return serverCtx
-		},
+		Handler: workHandler,
 	}
 
 	ctx := context.WithLog(context.Background(), logger.With().Str("wg", "serve"))
@@ -165,8 +165,13 @@ func listenAndServe(serverCtx, shutdownCtx context.C, handler http.Handler, c *v
 				return ctx.Err()
 			}
 		},
-		func(ctx context.Context) error {
+		func(ctx context.C) error {
 			log := zerolog.Ctx(ctx).With().Str("wk", "listen").Logger()
+
+			defer func() {
+				workHandler.Close()
+				log.Trace().Msg("HTTP Work handler closed")
+			}()
 
 			log.Info().Msgf("HTTP server listening: %s", address)
 			err := server.ListenAndServe()
@@ -177,6 +182,10 @@ func listenAndServe(serverCtx, shutdownCtx context.C, handler http.Handler, c *v
 
 			log.Info().Msg("HTTP server listening stopped")
 			return nil
+		},
+		func(ctx context.C) error {
+			ctx = context.WithLog(ctx, zerolog.Ctx(ctx).With().Str("wk", "serve"))
+			return wg.WorkChan(ctx, nil, wg.CancelNeverFirstError(), workHandler.Chan())
 		},
 	)
 }
