@@ -6,35 +6,41 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
-	zerologger "github.com/rs/zerolog/log"
+	zlog "github.com/rs/zerolog/log"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
 	wg "github.com/dxmaxwell/workgroup"
 	"github.com/makeshiftd/makeshiftd/context"
+	"github.com/makeshiftd/makeshiftd/loggers"
 )
+
+var log = loggers.NewLazyLoggerPkg("main")
 
 func main() {
 	if isatty.IsTerminal(os.Stdout.Fd()) {
 		w := zerolog.NewConsoleWriter(func(w *zerolog.ConsoleWriter) {
 			w.Out = os.Stdout
 		})
-		zerologger.Logger = zerolog.New(w).With().Timestamp().Logger()
+		zlog.Logger = zerolog.New(w).With().Timestamp().Logger()
+	} else {
+		// Copied from the zerolog/log source for initialization of global logger
+		zlog.Logger = zerolog.New(os.Stderr).With().Timestamp().Logger()
 	}
-
-	log := zerologger.Logger
 
 	ctx := context.Background()
 	mainCtx, mainCancel := context.WithCancel(ctx)
 	shutdownCtx, shutdownCancel := context.WithCancel(ctx)
 
-	wg.Work(context.WithLog(ctx, log.With().Str("wg", "main")), nil, wg.CancelOnFirstDone(),
+	log := log.With().Str("wg", "main").Logger()
+	wg.Work(ctx, nil, wg.CancelOnFirstDone(),
 		func(ctx context.C) error {
-			log := zerolog.Ctx(ctx).With().Str("wk", "shutdown").Logger()
+			log := log.With().Str("wk", "shutdown").Logger()
 
 			const StateStarted = "STARTED"
 			const StateStopping = "STOPPING"
@@ -72,7 +78,7 @@ func main() {
 			}
 		},
 		func(ctx context.C) error {
-			log := zerolog.Ctx(ctx).With().Str("wk", "main").Logger()
+			log := log.With().Str("wk", "main").Logger()
 			err := mainWithContexts(log.WithContext(mainCtx), shutdownCtx)
 			if err != nil {
 				log.Err(err).Send()
@@ -87,7 +93,7 @@ func main() {
 }
 
 func mainWithContexts(mainCtx, shutdownCtx context.C) error {
-	log := zerolog.Ctx(mainCtx)
+	log := loggers.Ctx(mainCtx)
 
 	pflag.StringP("config", "f", "", "Location of configuration file")
 	pflag.Parse()
@@ -133,21 +139,35 @@ func mainWithContexts(mainCtx, shutdownCtx context.C) error {
 }
 
 func listenAndServe(serverCtx, shutdownCtx context.C, handler http.Handler, c *viper.Viper) error {
-	logger := zerolog.Ctx(serverCtx)
-
-	workHandler := NewWorkHandler(handler, WorkerContext())
 
 	address := fmt.Sprintf("%s:%s", c.GetString("host"), c.GetString("port"))
 
+	serveWorkers := make(chan wg.Worker)
+
 	server := &http.Server{
-		Addr:    address,
-		Handler: workHandler,
+		Addr: address,
+		Handler: http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+			w := sync.WaitGroup{}
+			w.Add(1)
+			serveWorkers <- func(ctx context.C) error {
+				defer w.Done()
+				loggers.Ctx(ctx).Trace().Msg("HTTP server serve request")
+				handler.ServeHTTP(res, req)
+				return nil
+			}
+			w.Wait()
+		}),
 	}
 
-	ctx := context.WithLog(context.Background(), logger.With().Str("wg", "serve"))
-	return wg.Work(ctx, nil, wg.CancelOnFirstDone(),
+	log := log.With().Str("wg", "serve").Logger()
+	return wg.Work(context.Background(), nil, wg.CancelOnFirstDone(),
 		func(ctx context.C) error {
-			log := zerolog.Ctx(ctx).With().Str("wk", "shutdown").Logger()
+			log := log.With().Str("wk", "shutdown").Logger()
+
+			defer func() {
+				log.Trace().Msg("HTTP server shtudown close worker channel")
+				close(serveWorkers)
+			}()
 
 			select {
 			case <-serverCtx.Done():
@@ -166,12 +186,7 @@ func listenAndServe(serverCtx, shutdownCtx context.C, handler http.Handler, c *v
 			}
 		},
 		func(ctx context.C) error {
-			log := zerolog.Ctx(ctx).With().Str("wk", "listen").Logger()
-
-			defer func() {
-				workHandler.Close()
-				log.Trace().Msg("HTTP Work handler closed")
-			}()
+			log := log.With().Str("wk", "listen").Logger()
 
 			log.Info().Msgf("HTTP server listening: %s", address)
 			err := server.ListenAndServe()
@@ -184,8 +199,8 @@ func listenAndServe(serverCtx, shutdownCtx context.C, handler http.Handler, c *v
 			return nil
 		},
 		func(ctx context.C) error {
-			ctx = context.WithLog(ctx, zerolog.Ctx(ctx).With().Str("wk", "serve"))
-			return wg.WorkChan(ctx, nil, wg.CancelNeverFirstError(), workHandler.Chan())
+			log := log.With().Str("wk", "serve").Logger()
+			return wg.WorkChan(log.WithContext(ctx), nil, wg.CancelNeverFirstError(), serveWorkers)
 		},
 	)
 }

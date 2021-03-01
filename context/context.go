@@ -2,8 +2,6 @@ package context
 
 import (
 	"context"
-
-	"github.com/rs/zerolog"
 )
 
 type C = context.Context
@@ -17,8 +15,3 @@ var WithValue = context.WithValue
 var WithCancel = context.WithCancel
 var WithTimeout = context.WithTimeout
 var WithDeadline = context.WithDeadline
-
-func WithLog(c C, log zerolog.Context) C {
-	logger := log.Logger()
-	return logger.WithContext(c)
-}
