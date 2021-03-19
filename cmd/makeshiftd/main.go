@@ -126,11 +126,7 @@ func mainWithContexts(mainCtx, shutdownCtx context.C) error {
 		log.Info().Msgf("Configuration file read: %s", configFile)
 	}
 
-	handler := http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
-		log := zerolog.Ctx(req.Context())
-		log.Info().Msg("Hello World")
-		res.Write([]byte("<html><body>Hello World</body></html>"))
-	})
+	handler := New(viper.GetViper())
 
 	log.Info().Msg("Makeshiftd starting")
 	err = listenAndServe(mainCtx, shutdownCtx, handler, viper.Sub("server"))
