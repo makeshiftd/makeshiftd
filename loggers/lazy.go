@@ -42,7 +42,7 @@ func (l *LazyLogger) log() *zerolog.Logger {
 	return &l.logger
 }
 
-// Functions andd docs below mostly copied from Zerolog source code
+// Functions and docs below mostly copied from Zerolog source code
 
 // Output duplicates the global logger and sets w as its output.
 func (l *LazyLogger) Output(w io.Writer) zerolog.Logger {
