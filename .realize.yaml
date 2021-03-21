@@ -1,0 +1,37 @@
+settings:
+  legacy:
+    force: false
+    interval: 0s
+server:
+  status: true
+  host: localhost
+  port: 5001
+schema:
+- name: makeshiftd
+  path: .
+  env:
+    LOG_FORMAT: console
+  commands:
+    #fmt:
+    #  status: true
+    #vet:
+    #  status: true
+    #  method: go vet
+    build:
+      status: true
+      method: go build ./cmd/makeshiftd
+    run:
+      status: true
+      path: .
+  watcher:
+    extensions:
+    - go
+    paths:
+    - /
+    ignored_paths:
+    - .git
+    - .realize
+    - vendor
+    scripts:
+      - type: after
+        command: go test -v ./...
