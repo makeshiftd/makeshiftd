@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/viper"
 
 	wg "github.com/dxmaxwell/workgroup"
+	"github.com/makeshiftd/makeshiftd"
 	"github.com/makeshiftd/makeshiftd/context"
 	"github.com/makeshiftd/makeshiftd/loggers"
 )
@@ -126,7 +127,7 @@ func mainWithContexts(mainCtx, shutdownCtx context.C) error {
 		log.Info().Msgf("Configuration file read: %s", configFile)
 	}
 
-	handler := New(viper.GetViper())
+	handler := makeshiftd.New(viper.GetViper())
 
 	log.Info().Msg("Makeshiftd starting")
 	err = listenAndServe(mainCtx, shutdownCtx, handler, viper.Sub("server"))

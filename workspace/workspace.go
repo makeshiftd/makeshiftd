@@ -1,4 +1,4 @@
-package main
+package workspace
 
 import (
 	"bytes"
@@ -11,104 +11,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/makeshiftd/makeshiftd/context"
-	"github.com/spf13/viper"
+	"github.com/makeshiftd/makeshiftd/urlpath"
 )
 
-// Makeshiftd is the primary handler for the Makeshiftd service
-type Makeshiftd struct {
-	config *viper.Viper
-
-	workspaces    []*Workspace
-	workspacesMtx sync.RWMutex
-}
-
-// New creates a new Makeshiftd service from the configuration
-func New(config *viper.Viper) *Makeshiftd {
-	m := &Makeshiftd{
-		config: config,
-	}
-
-	wsconfig := config.GetStringMapString("workspaces")
-	for name, root := range wsconfig {
-		if !filepath.IsAbs(root) {
-			root = filepath.Join(root, config.ConfigFileUsed())
-		}
-		root = filepath.Clean(root)
-
-		w := NewWorkspace(m, name, root)
-		m.workspaces = append(m.workspaces, w)
-	}
-	return m
-}
-
-// Workspaces returns a copy the the configured workspaces
-func (m *Makeshiftd) Workspaces() []*Workspace {
-	m.workspacesMtx.RLock()
-	defer m.workspacesMtx.RUnlock()
-	workspaces := make([]*Workspace, len(m.workspaces))
-	copy(workspaces, m.workspaces)
-	return workspaces
-}
-
-func (m *Makeshiftd) match(slug string) *Workspace {
-	m.workspacesMtx.RLock()
-	defer m.workspacesMtx.RUnlock()
-
-	for _, ws := range m.workspaces {
-		if slug == ws.Slug {
-			return ws
-		}
-	}
-	return nil
-}
-
-func (m *Makeshiftd) ServeIndex(res http.ResponseWriter, req *http.Request) {
-	res.WriteHeader(http.StatusOK)
-	res.Write([]byte("Makeshiftd"))
-}
-
-func (m *Makeshiftd) ServeNotFound(res http.ResponseWriter, req *http.Request) {
-	res.WriteHeader(http.StatusNotFound)
-	res.Write([]byte("Not Found"))
-}
-
-func (m *Makeshiftd) ServeError(res http.ResponseWriter, req *http.Request) {
-	res.WriteHeader(http.StatusNotFound)
-	res.Write([]byte("Internal Server Error"))
-}
-
-// func splitSlug(path string) (string, string) {
-// 	idx := strings.Index(path, "/")
-// 	if idx < -1 {
-// 		return strings.ToLower(path), "/"
-// 	}
-// 	if idx > 0 {
-// 		return strings.ToLower(path[:idx]), path[idx+1:]
-// 	}
-// 	return splitSlug(path[1:])
-// }
-
-func (m *Makeshiftd) ServeHTTP(res http.ResponseWriter, req *http.Request) {
-	slug, path := popPath(req.URL.Path)
-	slug = strings.ToLower(slug)
-
-	if slug == "" {
-		m.ServeIndex(res, req)
-		return
-	}
-
-	w := m.match(slug)
-	if w == nil {
-		log.Debug().Msgf("Workspace not found: %s", req.URL.Path)
-		m.ServeNotFound(res, req)
-		return
-	}
-
-	req.URL.Path = path
-	w.ServeHTTP(res, req)
+type Makeshiftd interface {
+	Workspaces() []*Workspace
+	ServeError(res http.ResponseWriter, req *http.Request)
+	ServeNotFound(res http.ResponseWriter, req *http.Request)
 }
 
 // Workspace is the handler for a docuemnt root
@@ -117,14 +28,14 @@ type Workspace struct {
 	Slug string
 	Root string
 
-	m      *Makeshiftd
+	m      Makeshiftd
 	err    error
 	ctx    context.C
 	cancel context.CancelFunc
 }
 
-// NewWorkspace creates a new workspace for the given Makeshitfd service
-func NewWorkspace(m *Makeshiftd, name, root string) *Workspace {
+// New creates a new workspace for the given Makeshitfd service
+func New(m Makeshiftd, name, root string) *Workspace {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	slug := strings.ToLower(name)
@@ -160,25 +71,6 @@ func (w *Workspace) Cancel() {
 	w.cancel()
 }
 
-func popPath(p string) (string, string) {
-	idx := strings.Index(p, "/")
-	if idx < 0 {
-		return p, ""
-	}
-	if idx > 0 {
-		return p[:idx-1], p[idx+1:]
-	}
-	startIdx := 0
-	for idx == 0 {
-		startIdx++
-		idx = strings.Index(p[startIdx:], "/")
-	}
-	if idx < 0 {
-		return p[startIdx:], ""
-	}
-	return p[startIdx : startIdx+idx], p[startIdx+idx:]
-}
-
 func (w *Workspace) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	// ctx, cancel := context.Merge(req.Context(), w.ctx)
 	// defer cancel()
@@ -200,7 +92,7 @@ func (w *Workspace) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 			break
 		}
 
-		segment, path = popPath(path)
+		segment, path = urlpath.PopPath(path)
 		switch {
 		// case segment == "":
 		// 	break
