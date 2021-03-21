@@ -15,8 +15,7 @@ import (
 
 // Makeshiftd is the primary handler for the Makeshiftd service
 type Makeshiftd struct {
-	config *viper.Viper
-
+	config        *viper.Viper
 	workspaces    []*workspace.Workspace
 	workspacesMtx sync.RWMutex
 }
@@ -76,19 +75,10 @@ func (m *Makeshiftd) ServeError(res http.ResponseWriter, req *http.Request) {
 	res.Write([]byte("Internal Server Error"))
 }
 
-// func splitSlug(path string) (string, string) {
-// 	idx := strings.Index(path, "/")
-// 	if idx < -1 {
-// 		return strings.ToLower(path), "/"
-// 	}
-// 	if idx > 0 {
-// 		return strings.ToLower(path[:idx]), path[idx+1:]
-// 	}
-// 	return splitSlug(path[1:])
-// }
+//commend
 
 func (m *Makeshiftd) ServeHTTP(res http.ResponseWriter, req *http.Request) {
-	slug, path := urlpath.PopPath(req.URL.Path)
+	slug, path := urlpath.PopLeft(req.URL.Path)
 	slug = strings.ToLower(slug)
 
 	if slug == "" {

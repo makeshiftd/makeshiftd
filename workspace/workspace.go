@@ -92,7 +92,7 @@ func (w *Workspace) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 			break
 		}
 
-		segment, path = urlpath.PopPath(path)
+		segment, path = urlpath.PopLeft(path)
 		switch {
 		// case segment == "":
 		// 	break
@@ -149,6 +149,10 @@ func (w *Workspace) servePath(docPath string, res http.ResponseWriter, req *http
 	if err != nil {
 		// 500
 		return
+	}
+	// Disable default redirect by ServeContent().
+	if filepath.Base(docPath) == "index.html" {
+		docPath = "noredirect.html"
 	}
 	http.ServeContent(res, req, docPath, docInfo.ModTime(), docFile)
 }

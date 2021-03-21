@@ -1,22 +1,33 @@
 package urlpath
 
-import "strings"
+import (
+	urlpath "path"
+	"strings"
+)
 
-func PopPath(p string) (string, string) {
-	idx := strings.Index(p, "/")
+func Base(path string) string {
+	return urlpath.Base(path)
+}
+
+func PopLeft(path string) (string, string) {
+	idx := strings.Index(path, "/")
 	if idx < 0 {
-		return p, ""
+		return path, ""
 	}
 	if idx > 0 {
-		return p[:idx-1], p[idx+1:]
+		endIdx := idx
+		for strings.Index(path[idx+1:], "/") == 0 {
+			idx++
+		}
+		return path[:endIdx], path[idx+1:]
 	}
 	startIdx := 0
 	for idx == 0 {
 		startIdx++
-		idx = strings.Index(p[startIdx:], "/")
+		idx = strings.Index(path[startIdx:], "/")
 	}
 	if idx < 0 {
-		return p[startIdx:], ""
+		return path[startIdx:], ""
 	}
-	return p[startIdx : startIdx+idx], p[startIdx+idx:]
+	return path[startIdx : startIdx+idx], path[startIdx+idx:]
 }
