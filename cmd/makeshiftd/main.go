@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,8 +25,18 @@ import (
 var log = loggers.NewLazyLoggerPkg("main")
 
 func main() {
-	if isatty.IsTerminal(os.Stdout.Fd()) {
+	logFormat := strings.ToLower(os.Getenv("LOG_FORMAT"))
+	if logFormat == "" {
+		if isatty.IsTerminal(os.Stdout.Fd()) {
+			logFormat = "console"
+		} else {
+			logFormat = "json"
+		}
+	}
+	if logFormat == "console" {
+		noColor := strings.ToLower(os.Getenv("LOG_COLOR")) == "false"
 		w := zerolog.NewConsoleWriter(func(w *zerolog.ConsoleWriter) {
+			w.NoColor = noColor
 			w.Out = os.Stdout
 		})
 		zlog.Logger = zerolog.New(w).With().Timestamp().Logger()
