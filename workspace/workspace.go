@@ -9,12 +9,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/makeshiftd/makeshiftd/context"
+	"github.com/makeshiftd/makeshiftd/loggers"
 	"github.com/makeshiftd/makeshiftd/urlpath"
 )
+
+var log = loggers.NewLazyLoggerPkg("workspace")
 
 type Makeshiftd interface {
 	Workspaces() []*Workspace
@@ -72,31 +76,22 @@ func (w *Workspace) Cancel() {
 }
 
 func (w *Workspace) ServeHTTP(res http.ResponseWriter, req *http.Request) {
+
 	// ctx, cancel := context.Merge(req.Context(), w.ctx)
 	// defer cancel()
-	res.WriteHeader(http.StatusOK)
-	res.Write([]byte("Hello from Workspace"))
 
 	exec := false
 	path := req.URL.Path
+	log.Debug().Msgf("Serve HTTP slug: %s, path: %s", w.Slug, path)
 
 	segment := ""
 	segments := []string{}
 	for {
-		if path == "" {
-			break
-		}
-
-		if path == "/" {
-			segments = append(segments, "index.html")
-			break
-		}
-
 		segment, path = urlpath.PopLeft(path)
+		if segment == "" {
+			break
+		}
 		switch {
-		// case segment == "":
-		// 	break
-
 		case segment == ".":
 			continue
 
@@ -131,25 +126,37 @@ func (w *Workspace) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 }
 
 func (w *Workspace) servePath(docPath string, res http.ResponseWriter, req *http.Request) {
-
 	docInfo, err := os.Stat(docPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			w.m.ServeNotFound(res, req)
-		} else {
-			w.m.ServeNotFound(res, req) // TODO 500
+	if err == nil && docInfo.IsDir() {
+		pattern := strings.ReplaceAll(docPath, "*", "\\*")
+		pattern = strings.ReplaceAll(pattern, "?", "\\?")
+		pattern = strings.ReplaceAll(pattern, "[", "\\[")
+		pattern = strings.ReplaceAll(pattern, "\\", "\\\\") // Windows?
+		pattern = filepath.Join(docPath, "index.*")
+		matches, err := filepath.Glob(pattern)
+		if err == nil && len(matches) > 0 {
+			sort.Strings(matches)
+			docPath = matches[0]
+			docInfo, err = os.Stat(docPath)
 		}
-		return
 	}
-	if docInfo.IsDir() {
+	log.Debug().Msgf("Serve file path: %s", docPath)
+	if (err == nil && docInfo.IsDir()) ||
+		(err != nil && os.IsNotExist(err)) {
 		w.m.ServeNotFound(res, req)
 		return
 	}
-	docFile, err := os.Open(docPath)
 	if err != nil {
-		// 500
+		w.m.ServeNotFound(res, req) // TODO 500
 		return
 	}
+
+	docFile, err := os.Open(docPath)
+	if err != nil {
+		w.m.ServeNotFound(res, req) // TODO 500
+		return
+	}
+	defer docFile.Close()
 	// Disable default redirect by ServeContent().
 	if filepath.Base(docPath) == "index.html" {
 		docPath = "noredirect.html"
@@ -171,6 +178,7 @@ var executers = []struct {
 }
 
 func (w *Workspace) execPath(docPath string, res http.ResponseWriter, req *http.Request) {
+	log.Debug().Msgf("Exec file path: %s", docPath)
 
 	var exeDocPath string
 	var exeCommand string

@@ -107,6 +107,11 @@ func main() {
 func mainWithContexts(mainCtx, shutdownCtx context.C) error {
 	log := loggers.Ctx(mainCtx)
 
+	if log.GetLevel() >= zerolog.TraceLevel {
+		wd, _ := os.Getwd()
+		log.Trace().Msgf("Working directory: %s", wd)
+	}
+
 	pflag.StringP("config", "f", "", "Location of configuration file")
 	pflag.Parse()
 

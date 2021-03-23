@@ -1,0 +1,6 @@
+{
+    "version": 1,
+    "workspaces": {
+        "ws1":"./workspace1"
+    }
+}

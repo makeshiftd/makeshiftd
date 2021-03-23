@@ -6,12 +6,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 
+	"github.com/makeshiftd/makeshiftd/loggers"
 	"github.com/makeshiftd/makeshiftd/urlpath"
 	"github.com/makeshiftd/makeshiftd/workspace"
 )
+
+var log = loggers.NewLazyLoggerPkg("makeshiftd")
 
 // Makeshiftd is the primary handler for the Makeshiftd service
 type Makeshiftd struct {
@@ -29,7 +31,8 @@ func New(config *viper.Viper) *Makeshiftd {
 	wsconfig := config.GetStringMapString("workspaces")
 	for name, root := range wsconfig {
 		if !filepath.IsAbs(root) {
-			root = filepath.Join(root, config.ConfigFileUsed())
+			configFileDir := filepath.Dir(config.ConfigFileUsed())
+			root = filepath.Join(configFileDir, root)
 		}
 		root = filepath.Clean(root)
 
@@ -75,9 +78,8 @@ func (m *Makeshiftd) ServeError(res http.ResponseWriter, req *http.Request) {
 	res.Write([]byte("Internal Server Error"))
 }
 
-//commend
-
 func (m *Makeshiftd) ServeHTTP(res http.ResponseWriter, req *http.Request) {
+	log.Debug().Msgf("Serve HTTP path: %s", req.URL.Path)
 	slug, path := urlpath.PopLeft(req.URL.Path)
 	slug = strings.ToLower(slug)
 

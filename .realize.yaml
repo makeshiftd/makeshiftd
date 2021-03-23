@@ -23,6 +23,8 @@ schema:
     run:
       status: true
       path: .
+  args:
+  - --config=./testdata/makeshiftd.json
   watcher:
     extensions:
     - go
@@ -34,4 +36,4 @@ schema:
     - vendor
     scripts:
       - type: after
-        command: go test -v ./...
+        command: go test -count=1 ./...
