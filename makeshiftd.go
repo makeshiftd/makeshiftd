@@ -68,14 +68,18 @@ func (m *Makeshiftd) ServeIndex(res http.ResponseWriter, req *http.Request) {
 	res.Write([]byte("Makeshiftd"))
 }
 
-func (m *Makeshiftd) ServeNotFound(res http.ResponseWriter, req *http.Request) {
-	res.WriteHeader(http.StatusNotFound)
-	res.Write([]byte("Not Found"))
-}
-
-func (m *Makeshiftd) ServeError(res http.ResponseWriter, req *http.Request) {
-	res.WriteHeader(http.StatusNotFound)
-	res.Write([]byte("Internal Server Error"))
+func (m *Makeshiftd) ServeError(cause interface{}, res http.ResponseWriter, req *http.Request) {
+	code := http.StatusInternalServerError
+	msg := http.StatusText(code)
+	switch cause := cause.(type) {
+	case int:
+		code = cause
+		msg = http.StatusText(code)
+	case error:
+		msg = cause.Error()
+	}
+	res.WriteHeader(code)
+	res.Write([]byte(msg))
 }
 
 func (m *Makeshiftd) ServeHTTP(res http.ResponseWriter, req *http.Request) {
@@ -91,7 +95,7 @@ func (m *Makeshiftd) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	w := m.match(slug)
 	if w == nil {
 		log.Debug().Msgf("Workspace not found: %s", req.URL.Path)
-		m.ServeNotFound(res, req)
+		m.ServeError(http.StatusNotFound, res, req)
 		return
 	}
 

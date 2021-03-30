@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -22,8 +21,7 @@ var log = loggers.NewLazyLoggerPkg("workspace")
 
 type Makeshiftd interface {
 	Workspaces() []*Workspace
-	ServeError(res http.ResponseWriter, req *http.Request)
-	ServeNotFound(res http.ResponseWriter, req *http.Request)
+	ServeError(cause interface{}, res http.ResponseWriter, req *http.Request)
 }
 
 // Workspace is the handler for a docuemnt root
@@ -104,7 +102,7 @@ func (w *Workspace) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 		case strings.HasPrefix(segment, "."):
 			fallthrough
 		case strings.HasPrefix(segment, "_"):
-			w.m.ServeNotFound(res, req)
+			w.serveError(http.StatusNotFound, res, req)
 			return
 
 		case strings.HasPrefix(segment, "!"):
@@ -114,54 +112,18 @@ func (w *Workspace) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 		segments = append(segments, segment)
 	}
 
-	segments = append([]string{w.Root}, segments...)
-
+	//segments = append([]string{w.Root}, segments...)
 	req.URL.Path = path
-	docPath := filepath.Join(segments...)
+	docPath := urlpath.Join(segments...)
 	if exec {
-		w.execPath(docPath, res, req)
+		w.execDoc(docPath, res, req)
 	} else {
-		w.servePath(docPath, res, req)
+		w.serveDoc(docPath, res, req)
 	}
 }
 
-func (w *Workspace) servePath(docPath string, res http.ResponseWriter, req *http.Request) {
-	docInfo, err := os.Stat(docPath)
-	if err == nil && docInfo.IsDir() {
-		pattern := strings.ReplaceAll(docPath, "*", "\\*")
-		pattern = strings.ReplaceAll(pattern, "?", "\\?")
-		pattern = strings.ReplaceAll(pattern, "[", "\\[")
-		pattern = strings.ReplaceAll(pattern, "\\", "\\\\") // Windows?
-		pattern = filepath.Join(docPath, "index.*")
-		matches, err := filepath.Glob(pattern)
-		if err == nil && len(matches) > 0 {
-			sort.Strings(matches)
-			docPath = matches[0]
-			docInfo, err = os.Stat(docPath)
-		}
-	}
-	log.Debug().Msgf("Serve file path: %s", docPath)
-	if (err == nil && docInfo.IsDir()) ||
-		(err != nil && os.IsNotExist(err)) {
-		w.m.ServeNotFound(res, req)
-		return
-	}
-	if err != nil {
-		w.m.ServeNotFound(res, req) // TODO 500
-		return
-	}
-
-	docFile, err := os.Open(docPath)
-	if err != nil {
-		w.m.ServeNotFound(res, req) // TODO 500
-		return
-	}
-	defer docFile.Close()
-	// Disable default redirect by ServeContent().
-	if filepath.Base(docPath) == "index.html" {
-		docPath = "noredirect.html"
-	}
-	http.ServeContent(res, req, docPath, docInfo.ModTime(), docFile)
+func (w *Workspace) serveError(cause interface{}, res http.ResponseWriter, req *http.Request) {
+	w.m.ServeError(cause, res, req)
 }
 
 var executers = []struct {
@@ -177,7 +139,7 @@ var executers = []struct {
 	},
 }
 
-func (w *Workspace) execPath(docPath string, res http.ResponseWriter, req *http.Request) {
+func (w *Workspace) execDoc(docPath string, res http.ResponseWriter, req *http.Request) {
 	log.Debug().Msgf("Exec file path: %s", docPath)
 
 	var exeDocPath string
@@ -187,7 +149,7 @@ func (w *Workspace) execPath(docPath string, res http.ResponseWriter, req *http.
 		exeDocPath := docPath + executer.Ext
 		exeDocInfo, err := os.Stat(exeDocPath)
 		if err != nil && !os.IsNotExist(err) {
-			w.m.ServeError(res, req)
+			w.serveError(http.StatusInternalServerError, res, req)
 			return
 		}
 		if exeDocInfo.IsDir() {
@@ -197,7 +159,7 @@ func (w *Workspace) execPath(docPath string, res http.ResponseWriter, req *http.
 		exeArguments = executer.Args[:]
 	}
 	if exeCommand == "" {
-		w.m.ServeNotFound(res, req)
+		w.serveError(http.StatusNotFound, res, req)
 		return
 	}
 
@@ -212,7 +174,7 @@ func (w *Workspace) execPath(docPath string, res http.ResponseWriter, req *http.
 
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		w.m.ServeError(res, req)
+		w.serveError(http.StatusInternalServerError, res, req)
 		return
 	}
 	stderr := &bytes.Buffer{}
@@ -222,7 +184,7 @@ func (w *Workspace) execPath(docPath string, res http.ResponseWriter, req *http.
 	// TODO Work Group!
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		w.m.ServeError(res, req)
+		w.serveError(http.StatusInternalServerError, res, req)
 		return
 	}
 	stdout := &bytes.Buffer{}
@@ -232,13 +194,13 @@ func (w *Workspace) execPath(docPath string, res http.ResponseWriter, req *http.
 
 	err = cmd.Start()
 	if err != nil {
-		w.m.ServeError(res, req)
+		w.serveError(http.StatusInternalServerError, res, req)
 		return
 	}
 
 	err = cmd.Wait()
 	if err != nil {
-		w.m.ServeError(res, req)
+		w.serveError(http.StatusInternalServerError, res, req)
 		return
 	}
 

@@ -9,6 +9,14 @@ func Base(path string) string {
 	return urlpath.Base(path)
 }
 
+func Join(elem ...string) string {
+	return urlpath.Join(elem...)
+}
+
+func Split(path string) (string, string) {
+	return urlpath.Split(path)
+}
+
 func PopLeft(path string) (string, string) {
 	idx := strings.Index(path, "/")
 	if idx < 0 {
