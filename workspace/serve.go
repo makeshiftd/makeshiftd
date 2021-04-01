@@ -19,7 +19,7 @@ func (w *Workspace) serveDoc(docPath string, res http.ResponseWriter, req *http.
 	case "POST":
 		w.serveDocPost(docPath, res, req)
 	case "PUT":
-		// serveDocPut(docPath, res, req)
+		w.serveDocPut(docPath, res, req)
 	case "PATCH":
 		// serveDocPatch(docPath, res, req)
 	default:
@@ -94,7 +94,6 @@ func (w *Workspace) serveDocPost(docPath string, res http.ResponseWriter, req *h
 
 	err := os.MkdirAll(docFileDir, os.ModePerm)
 	if err != nil {
-		// 500
 		w.serveError(err, res, req)
 		return
 	}
@@ -125,4 +124,56 @@ func (w *Workspace) serveDocPost(docPath string, res http.ResponseWriter, req *h
 	location := urlpath.Join("/", w.Slug, docDir, docName)
 	res.Header().Add("Location", location)
 	res.WriteHeader(http.StatusCreated)
+}
+
+func (w *Workspace) serveDocPut(docPath string, res http.ResponseWriter, req *http.Request) {
+	docDir, docName := urlpath.Split(docPath)
+
+	docFileDir := filepath.FromSlash(docDir)
+	docFileDir = filepath.Join(w.Root, docFileDir)
+	docFilePath := filepath.Join(docFileDir, docName)
+	log.Debug().Msgf("Put file path: %s", docFilePath)
+
+	docFileExists := true
+	docFileInfo, err := os.Stat(docFilePath)
+	if err != nil && !os.IsNotExist(err) {
+		w.serveError(err, res, req)
+		return
+	}
+	if err == nil && docFileInfo.IsDir() {
+		w.serveError(http.StatusConflict, res, req)
+		return
+	}
+
+	if err != nil {
+		docFileExists = false
+		err := os.MkdirAll(docFileDir, os.ModePerm)
+		if err != nil {
+			w.serveError(err, res, req)
+			return
+		}
+	}
+
+	docFile, err := os.Create(docFilePath)
+	if err != nil {
+		w.serveError(err, res, req)
+		return
+	}
+	defer docFile.Close()
+
+	nbytes, err := io.Copy(docFile, req.Body)
+	if err != nil {
+		log.Err(err).Msgf("Error copying request body to file")
+		w.serveError(err, res, req)
+		return
+	}
+	log.Trace().Msgf("Request body copied to file: %d bytes", nbytes)
+
+	req.Body.Close()
+
+	if docFileExists {
+		res.WriteHeader(http.StatusOK)
+	} else {
+		res.WriteHeader(http.StatusCreated)
+	}
 }

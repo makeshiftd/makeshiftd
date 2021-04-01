@@ -35,7 +35,15 @@ func Get(url string) (*http.Response, []byte, error) {
 }
 
 func Post(url string, data []byte) (*http.Response, []byte, error) {
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+	return Request("POST", url, data)
+}
+
+func Put(url string, data []byte) (*http.Response, []byte, error) {
+	return Request("PUT", url, data)
+}
+
+func Request(method, url string, data []byte) (*http.Response, []byte, error) {
+	req, err := http.NewRequest(method, url, bytes.NewBuffer(data))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -152,5 +160,66 @@ func TestServeDocPost(t *testing.T) {
 			require.Equalf(t, data, body, "body:%s", string(body))
 		})
 	}
+}
 
+func TestServeDocPut(t *testing.T) {
+
+	table := []struct {
+		Path string
+		Code int
+	}{
+		{
+			Path: "/ws1/temp/data.json",
+			Code: http.StatusCreated,
+		},
+		{
+			Path: "/ws1/temp/data.json",
+			Code: http.StatusOK,
+		},
+		{
+			Path: "/ws1/temp/data_*.json",
+			Code: http.StatusCreated,
+		},
+		{
+			Path: "/ws1/temp/dir1/data.json",
+			Code: http.StatusCreated,
+		},
+		{
+			Path: "/ws1/temp/dir2/dir3/data.json",
+			Code: http.StatusCreated,
+		},
+		{
+			Path: "/ws1/temp/dir1/data.json",
+			Code: http.StatusOK,
+		},
+		{
+			Path: "/ws1/temp/dir2/dir3",
+			Code: http.StatusConflict,
+		},
+	}
+
+	temp := filepath.Join(TestDataPath, "workspace1", "temp")
+	err := os.MkdirAll(temp, os.ModePerm)
+	require.Nil(t, err, err)
+	defer os.RemoveAll(temp)
+
+	for idx, row := range table {
+		data := []byte(fmt.Sprintf(`{ "test": "hello World %d" }`, idx))
+
+		t.Run("PUT:"+row.Path, func(t *testing.T) {
+			res, body, err := Put(BaseURL+row.Path, data)
+			require.Nil(t, err, err)
+			require.Equal(t, row.Code, res.StatusCode)
+
+			if row.Code >= 400 {
+				return
+			}
+
+			res, body, err = Get(BaseURL + row.Path)
+			require.Nil(t, err, err)
+			require.Equal(t, http.StatusOK, res.StatusCode)
+
+			require.Equalf(t, data, body, "body:%s", string(body))
+		})
+	}
 }
